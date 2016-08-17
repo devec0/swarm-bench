@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/codegangsta/cli"
+  "github.com/docker/engine-api/types/swarm"
+  "golang.org/x/net/context"
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/montanaflynn/stats"
 )
@@ -14,6 +16,24 @@ import (
 const MILLIS_IN_SECOND = 1000
 
 func worker(requests int, image string, args []string, completeCh chan time.Duration) {
+
+  serviceSpec := docker.CreateServiceOptions {
+    swarm.ServiceSpec{
+      TaskTemplate: swarm.TaskSpec{
+        ContainerSpec: swarm.ContainerSpec{
+          Image: image,
+          Labels: nil,
+          Command: args,
+          Args: nil,
+          Env: nil,
+          Dir: "",
+          User: "",
+        },
+      },
+    },
+    context.Background(),
+  }
+
 	client, err := docker.NewClientFromEnv()
 	if err != nil {
 		panic(err)
@@ -23,10 +43,23 @@ func worker(requests int, image string, args []string, completeCh chan time.Dura
 		start := time.Now()
 
     //modified for service creation
-		_, err := client.CreateService(docker.CreateServiceOptions{})
+		service, err := client.CreateService(serviceSpec)
 		if err != nil {
 			panic(err)
 		}
+
+    //wait for service to be running
+    for wait := 0; wait < 100; wait++ {
+      status, err := client.InspectService( service.ID )
+      replicas := status.Spec.Mode.Replicated.Replicas
+      if (*replicas > 0) {
+        break;
+      }
+      if err != nil {
+        panic(err)
+      }
+      time.Sleep( 100 * time.Millisecond )
+    }
 
 		completeCh <- time.Since(start)
 	}
